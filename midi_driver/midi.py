@@ -245,6 +245,311 @@ class MidiFormatError(Exception):
             return "Not supported FPS timing"
         
         
+class MidiFile:
+    """Hold data of a single MIDI file.
+
+    Instance variables:
+    data -- byte string holding the file content
+    instrument -- the last instrument used in particular channel (listed 
+    by a channel)
+    noteList -- the list of all notes existing in this file
+    tempoList -- list of all tempo changes which occured in this 
+    sequence
+    offest -- current file pointer position counting from the beginning
+    of the file, allows naviation over the data string
+    tickDiv -- current time division base (bits per quarternote)
+    timing -- current time position when reading the file   
+    tracksCount -- number of tracks in this file
+
+    Static constants:
+    maxInt -- maximum integer, to limit the time value in broken files
+    maxVelocity -- maximum note velocity allowed
+    
+    Public methods:
+    __init__
+    selectNotes -- select notes with attributes fitting to the arguments
+    given
+    extractSelectedNotes -- form a new list of notes from a given list 
+    using only the elements marked as selected.
+        
+    """
+
+    maxInt = 2147483647
+    maxVelocity = 127
+
+    def str2Number(self,length):
+        """Extract from a file an integer value of a fixed length.
+
+        After number extraction offset attribute is enlarged by 
+        the length of the number.
+
+        """
+        result = 0
+        for byte in self.data[self.offset:self.offset+length]:
+            result = (result << 8) + ord(byte)
+        self.offset += length
+        return result
+
+    def strvlq2Number(self):
+        """Extract VLQ (variable length quantity) from a file.
+
+        File offset is enlarged by the size of the number
+        retrieved.
+
+        """
+        result = 0
+        while 1:
+            byte = ord(self.data[self.offset])
+            self.offset += 1
+            result = (result << 7) + (byte & 0x7F)
+            if not (byte & 0x80):
+                break
+        return result
+
+    def finishNote(self,noteVal,channel,velocity):
+        """Search for the last unfinished note and fill out the missing 
+        parameters.
+
+        Attributes noteVal and channel are required to find find the 
+        appropriate note. Its stopT attribute will be assigned the current
+        timing and stopVel will be replaced with velocity given. In case the
+        timing of the note (startT, stopT) or the file timing exceed the 
+        maxInt value, the note is deleted.
+
+        """
+        if self.noteList:
+            for note in self.noteList[-1::-1]:
+                if (note.val == noteVal) and (note.channel == channel):
+                    if (note.startT == self.timing)\
+                        or (note.startT>self.maxInt)\
+                        or (self.timing>self.maxInt):
+                        self.noteList.remove(note)
+                        break
+                    note.stopT = self.timing
+                    note.stopVel = velocity
+                    break
+
+
+    def handleMidiEvent(self,midiEvent,time):
+        """Parse the MIDI events found in the file.
+
+        Only following events are handled:
+        noteOn - when encoutered, create the new note with provided parameters
+        or if the velocity was 0, invoke finishNote() with provided parameters
+        noteOff - when encoutered, invoke finishNote() with provided 
+        parameters
+        programChange - when encoutered, change the instrument of a given 
+        channel
+
+        Other events are skipped while they are unnecessary for the script 
+        purpose.
+
+        """
+        hiBits = midiEvent >> 4
+        loBits = midiEvent & 0xF
+        if hiBits == 0x8:
+            channel = loBits
+            note = self.str2Number(1)
+            if channel == 9:
+                note += 0x80
+            velocity = self.str2Number(1)
+            self.finishNote(note,channel,velocity)
+        elif hiBits == 0x9:
+            channel = loBits
+            note = self.str2Number(1)
+            if channel == 9:
+                note += 0x80
+            velocity = self.str2Number(1)
+            if velocity == 0:
+                self.finishNote(note,channel,velocity)
+            else:
+                self.noteList.append(Note(note,self.instrument[loBits],\
+                channel,self.timing,self.timing,velocity,velocity))
+        elif hiBits == 0xC:
+            channel = loBits
+            instrument = self.str2Number(1)
+            if channel == 9:
+                instrument += 0x80
+            self.instrument[channel] = instrument
+        elif hiBits == 0xD:
+            self.offset += 1
+        else:
+            self.offset += 2
+
+    def readTrackChunk(self):
+        """Parse the track chunk (MTrk).
+
+        If this chunk has an invalid id, it is skipped.
+
+        Reset the timing attribute and the instrument list.
+
+        Handle events:
+        MIDI events - passed to the handleMidiEvents
+        meta-events - tempo change (addsnew to the tempo list) and EndOfTrack
+        (finishes reading this track)
+        Other events are skipped. Last MIDI event id is hold in case of 
+        running status bytes occurence.
+
+        """
+        chunkId = self.str2Number(4)
+        chunkLength = self.str2Number(4)
+        if not (chunkId == 0x4D54726B):
+            self.offset = chunkLength + self.offset
+            return
+        chunkLength += self.offset
+        self.tracksCount -= 1
+        self.timing = 0
+        lastMidiEvent = 0
+        self.instrument = [0]*16
+        self.instrument[9] = 0x80
+        while 1:
+            ## read current track time
+            self.timing += self.strvlq2Number( )
+            byte = self.str2Number(1)
+            if (byte & 0x80):
+                hiBits = byte >> 4
+                loBits = byte & 0xF
+                if hiBits == 0xF:
+                    if loBits == 0xF:
+                        metaEvent = self.str2Number(1)
+                        eventLength = self.strvlq2Number()
+                        if metaEvent == 0x2F:
+                            return
+                        elif metaEvent == 0x51:
+                            tempo = self.str2Number(eventLength)
+                            self.tempoList.append([self.timing,\
+                                                tempo/(self.tickDiv*1000)])
+                        else:
+                            self.offset += eventLength
+                    else:
+                        eventLength = self.strvlq2Number()
+                        self.offset += eventLength
+                else:
+                    lastMidiEvent = byte
+                    self.handleMidiEvent(byte,self.timing)
+            else:
+                ## handle running state
+                self.offset -= 1
+                self.handleMidiEvent(lastMidiEvent,self.timing)   
+
+    def readHeaderChunk(self):
+        """Parse the header (MThd) chunk.
+
+        Retrieves the inforamtion about the file id, MIDI format, number of 
+        tracks and initial time base resolution. Raises MidiFormatException
+        if any parameter refers to the unsuported MIDI file type.
+
+        """
+        if not (self.str2Number(4) == 0x4d546864):
+            raise MidiFormatError(MidiFormatError.NOT_MIDI)
+        self.offset += 4
+        if self.str2Number(2) > 1:
+            raise MidiFormatError(MidiFormatError.BAD_FORMAT)
+        self.tracksCount = self.str2Number(2)
+        self.tickDiv = self.str2Number(2)
+        if self.tickDiv & 0x8000:
+            raise MidiFormatError(MidiFormatError.BAD_TIMEDIV)
+        self.tickDiv = float(self.tickDiv)
+
+    def calcRealTime(self,bitTime):
+        """Convert bitTime into miliseconds.
+    
+        Time given in MIDI bits is calculated into miliseconds
+        according to the tempo changes stored in the tempo list
+
+        """
+        result = 0
+        prevTempo = self.tempoList[0]
+        for tempo in self.tempoList:
+            if tempo[0] < bitTime:
+                result += (tempo[0] - prevTempo[0]) * prevTempo[1]
+                prevTempo = tempo
+            else:
+                break
+        result += (bitTime - prevTempo[0]) * prevTempo[1]
+        return int(result)
+        
+    def __init__(self, fileName):
+        """Constructor.
+
+        Open and parse MIDI file. Retrieve all available notes and
+        recalculate their timing into miliseconds. Sort note list.
+        """
+        self.totalTime = 0
+        self.offset = 0
+        self.tracksCount = 0
+        self.tickDiv = 500000
+        self.noteList = []
+        self.tempoList = []
+        f = open(fileName, 'rb')
+        self.data = f.read()
+        self.readHeaderChunk( )
+        while self.tracksCount > 0:
+            self.readTrackChunk( )    
+        if not self.tempoList:
+            self.tempoList.append([self.timing,500/self.tickDiv])
+        else:
+            self.tempoList.sort()
+        for note in self.noteList:
+            note.startT = self.calcRealTime(note.startT)
+            note.stopT = self.calcRealTime(note.stopT)
+            if note.stopT > self.totalTime:
+                self.totalTime = note.stopT
+        self.noteList.sort()       
+        
+    def selectNotes(notes,channel=-1,instrument=-1,noteVal=-1\
+                    ,timeRange=[-1,-1],order=[0,1]):
+        """Select notes with attributes fitting to the arguments given
+
+        Each note which attributes equals the respective given values
+        is marked as selected.
+
+        Arguments:
+        notes -- note list to be processed
+        channel -- requested channel value, skipped if -1
+        instrument -- requested instrument type value, skipped if -1
+        noteVal -- reqested pitch value, skipped if -1
+        timeRange -- restrict selected notes to those which at least partially
+        fit into given time interval; timeRange[0] has to be greater than 
+        timeRange[1]
+        order -- from selected notes choose every order[1]-th element 
+        beginning from the order[0]-th element
+        
+        """
+        result = []
+        for id, note in enumerate(notes):
+            note.isSelected = False
+            if (channel == -1) or (note.channel == channel):
+                if (instrument == -1) or (note.instr == instrument):
+                    if (noteVal == -1) or (note.val == noteVal):
+                        if (timeRange[0] == -1) and  (timeRange[1] == -1):
+                            if (id < order[0]) or (((id-order[0])%order[1])!=0):
+                                continue
+                            else:
+                                note.isSelected = True
+                        elif ((note.startT<timeRange[0])\
+                            and (note.stopT<timeRange[0]))\
+                            or ((note.startT>timeRange[1])\
+                            and (note.stopT>timeRange[1])):
+                            continue
+                        else:
+                            note.isSelected = True
+    selectNotes = staticmethod(selectNotes)
+
+    def extractSelectedNotes(notes):
+        """Form a new list of notes from a given list using only the elements
+        marked as selected.
+        
+        """
+        result = []
+        for note in notes:
+            if note.isSelected:
+                result.append(note)
+        return result
+    extractSelectedNotes = staticmethod(extractSelectedNotes)
+        
+        
+        
 def test():
     print('testing midi module:')     
     note1 = Note(1,0,0,0,10,20,20)
