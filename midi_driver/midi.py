@@ -286,7 +286,7 @@ class MidiFile:
         """
         result = 0
         for byte in self.data[self.offset:self.offset+length]:
-            result = (result << 8) + ord(byte)
+            result = (result << 8) + byte
         self.offset += length
         return result
 
@@ -299,7 +299,7 @@ class MidiFile:
         """
         result = 0
         while 1:
-            byte = ord(self.data[self.offset])
+            byte = self.data[self.offset]
             self.offset += 1
             result = (result << 7) + (byte & 0x7F)
             if not (byte & 0x80):
@@ -557,6 +557,15 @@ def test():
     print(note1)
     print(note2)    
     print( (note1 > note2) )
+    
+    midi_track = MidiFile("U:/dokumenty/mid\/sample.mid")
+    print(midi_track.totalTime)
+    print(midi_track.offset)
+    print(midi_track.tracksCount)
+    print(midi_track.tickDiv)
+    for note in midi_track.noteList:
+        print(note)
+    print(midi_track.tempoList)
     
 if __name__ == "__main__": 
     test()
