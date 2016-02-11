@@ -132,7 +132,7 @@ class Note:
                104:"Sitar",105:"Banjo",106:"Shamisen",107:"Koto",108:"Kalimba",\
                109:"Bag Pipe",110:"Fiddle",111:"Shanai",112:"Tinkle Bell",\
                113:"Agogo",114:"Steel Drums",115:"Woodblock",116:"Taiko Drum",\
-               117:"Melodic Tom",118:"Synth Drum",118:"Reverse Cymbal",\
+               117:"Melodic Tom",118:"Synth Drum",119:"Reverse Cymbal",\
                120:"Guitar Fret Noise",121:"Breath Noise",122:"Seashore",\
                123:"Bird Tweet",124:"Telephone Ring",125:"Helicopter",\
                126:"Applause",127:"Gunshot",128:"Standard Drum Set",\
@@ -551,6 +551,8 @@ class MidiFile:
         
         
 def test():
+    import sys
+    
     print('testing midi module:')     
     note1 = Note(1,0,0,0,10,20,20)
     note2 = Note(0,0,0,0,10,20,20)
@@ -558,14 +560,16 @@ def test():
     print(note2)    
     print( (note1 > note2) )
     
-    midi_track = MidiFile("U:/dokumenty/mid\/sample.mid")
-    print(midi_track.totalTime)
-    print(midi_track.offset)
-    print(midi_track.tracksCount)
-    print(midi_track.tickDiv)
-    for note in midi_track.noteList:
-        print(note)
-    print(midi_track.tempoList)
+    if len(sys.argv) > 1 :
+        print("midi file: ", sys.argv[1])
+        midi_track = MidiFile(sys.argv[1])
+        print(midi_track.totalTime)
+        print(midi_track.offset)
+        print(midi_track.tracksCount)
+        print(midi_track.tickDiv)
+        for note in midi_track.noteList:
+            print(note)
+        print(midi_track.tempoList)
     
 if __name__ == "__main__": 
     test()
