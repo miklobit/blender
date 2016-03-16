@@ -25,7 +25,8 @@ Created on 10 lut 2016
 # --------------------------------------------------------------------------
 
 
-"""  code adoptet from midi_driver072.py bledner add-on by Pawel Adamowicz (adamowicz_pawel0@gmail.com)
+"""  code adoptet from midi_driver072.py bledner add-on : http://blendit.xaa.pl/ 
+     by Pawel Adamowicz (adamowicz_pawel0@gmail.com) 
     2016.02.10 Milosz Klosowicz (miklobit@gmail.com) - adaptation for python3, blender 2.7
 """
 
