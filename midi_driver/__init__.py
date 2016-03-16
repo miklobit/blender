@@ -29,12 +29,12 @@ bl_info = {
     "author": "Milosz Klosowicz (miklobit)",
     "version": (0, 1, 0),
     "blender": (2, 76, 0),
-    "location": "View3D > Add > Mesh",
-    "description": "Adds a tree created with the space colonization algorithm starting at the 3D cursor",
+    "location": "3D View > Toolbox",
+    "description": "Synchronises specified Ipo or action with notes from a MIDI sequence",
     "warning": "",
     "wiki_url": "https://github.com/miklobit/blender/wiki",
     "tracker_url": "",
-    "category": "Animation driver"}
+    "category": "Animation"}
 
 
 from .midi import Note, MidiFile
